@@ -21,26 +21,46 @@ class Motors:
     def __init__(self, pca: PCA9685, cfg: BoardConfig):
         self.pca = pca
         self.cfg = cfg
+        # set() writes channels 0..n-1 as one contiguous block, so the channel
+        # map must cover exactly that range with no gaps. A gap would silently
+        # write 0 (coast) to an unmapped channel instead of leaving it alone.
+        chans = sorted(c for pair in cfg.motor_channels.values() for c in pair)
+        if chans != list(range(len(chans))):
+            raise ValueError(
+                f"motor_channels must cover channels 0..{len(chans) - 1} with no "
+                f"gaps or duplicates for block writes; got {chans}"
+            )
+        self._nch = len(chans)
 
-    def _set_wheel(self, wheel: str, duty: int) -> None:
-        fwd_ch, rev_ch = self.cfg.motor_channels[wheel]
+    @staticmethod
+    def _wheel_duties(fwd_ch: int, rev_ch: int, duty: int) -> tuple:
+        """(channel, duty) pairs for one wheel. Single source of the H-bridge
+        polarity rule — both set() and _set_wheel go through it."""
         duty = _clamp(duty)
         if duty > 0:
-            self.pca.set_duty(rev_ch, 0)
-            self.pca.set_duty(fwd_ch, duty)
-        elif duty < 0:
-            self.pca.set_duty(fwd_ch, 0)
-            self.pca.set_duty(rev_ch, -duty)
-        else:  # active brake
-            self.pca.set_duty(fwd_ch, 4095)
-            self.pca.set_duty(rev_ch, 4095)
+            return ((rev_ch, 0), (fwd_ch, duty))
+        if duty < 0:
+            return ((fwd_ch, 0), (rev_ch, -duty))
+        return ((fwd_ch, 4095), (rev_ch, 4095))   # active brake
+
+    def _set_wheel(self, wheel: str, duty: int) -> None:
+        """Drive one wheel. Diagnostics only — set() is the fast path."""
+        fwd_ch, rev_ch = self.cfg.motor_channels[wheel]
+        for ch, val in self._wheel_duties(fwd_ch, rev_ch, duty):
+            self.pca.set_duty(ch, val)
 
     def set(self, lf: int, lr: int, rf: int, rr: int) -> None:
-        """Set all four wheels by signed duty."""
-        self._set_wheel("left_front", lf)
-        self._set_wheel("left_rear", lr)
-        self._set_wheel("right_front", rf)
-        self._set_wheel("right_rear", rr)
+        """Set all four wheels by signed duty, in a single I2C transaction.
+
+        Projects the named-wheel map onto positional channel slots — index is
+        channel number — then hands the whole block to the PCA9685 at once.
+        """
+        duties = [0] * self._nch
+        for wheel, duty in zip(self.ORDER, (lf, lr, rf, rr)):
+            fwd_ch, rev_ch = self.cfg.motor_channels[wheel]
+            for ch, val in self._wheel_duties(fwd_ch, rev_ch, duty):
+                duties[ch] = val
+        self.pca.set_all_duties(duties)
 
     def stop(self) -> None:
         self.set(0, 0, 0, 0)

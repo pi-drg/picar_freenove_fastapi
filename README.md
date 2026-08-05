@@ -144,6 +144,43 @@ and strafe translated sideways in both directions.
 Strafing fights the rollers and needs more duty than driving — 1200 works on a
 hard floor, well above the ~700 unloaded stall floor.
 
+## I²C throughput
+
+Every motor update writes eight PCA9685 channels. The chip's registers are
+consecutive, so MODE1's auto-increment bit (`0x20`) is enabled and writes are
+batched: `set_pwm` sends one channel's four registers in a single transaction,
+and `Motors.set` sends **all eight channels — the whole motor state — in one**.
+The address, register and framing overhead is paid once instead of 32 times.
+
+Measured on picar-finland-01 (Pi Zero 2 W, 100 kHz bus), full 8-channel update:
+
+| | Transactions | Per update | Ceiling |
+|---|---|---|---|
+| Per-register writes (pre-2026-08-05) | 32 | 11.17 ms | 90 Hz |
+| Per-channel block (`set_pwm`) | 8 | 5.14 ms | 195 Hz |
+| Whole-block (`set_all_duties`) | **1** | **3.23 ms** | **310 Hz** |
+| Whole-block @ 400 kHz | 1 | ~0.95 ms (projected) | ~1050 Hz |
+
+`Motors.set` projects the named-wheel map onto positional channel slots, so
+`motor_channels` must cover channels `0..n-1` with no gaps — `Motors.__init__`
+enforces that, because a gap would silently coast an unmapped channel rather
+than leave it alone. The batched path is verified register-identical to the
+old per-wheel path across 507 input combinations.
+
+At demo rates — one command per ~700 ms — none of this is visible. It matters
+only if you drive the car from a high-rate control loop (ROS 2 `cmd_vel`,
+`ros2_control`), where 11 ms against a 10 ms budget misses every deadline.
+
+Bus speed is a device-tree parameter fixed at boot and **cannot be set from
+Python**. `config.i2c_expected_hz` is declarative: the driver reads the real
+clock from `/sys/bus/i2c/devices/i2c-N/of_node/clock-frequency` and logs a
+warning on mismatch. To actually change it, `deploy/install.sh --i2c-fast`
+(adds `dtparam=i2c_arm_baudrate=400000`), reboot, then update the config field.
+
+Fast mode is opt-in on purpose: this HAT has long bus traces shared with the
+ADS7830, so if `/battery` starts returning intermittent errors after enabling
+it, that is the cause — revert the dtparam.
+
 ## Open-loop safety
 
 No wheel encoders on the stock kit → every `/drive` and `/mecanum` schedules a

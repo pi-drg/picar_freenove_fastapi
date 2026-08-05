@@ -1,7 +1,21 @@
 #!/usr/bin/env bash
 # Idempotent installer for picar_freenove_fastapi on a Raspberry Pi (Bookworm/Trixie).
 # Run it from anywhere:  ./picar_freenove_fastapi/deploy/install.sh
+#
+# Options:
+#   --i2c-fast   switch the I2C bus to 400kHz fast mode (needs a reboot).
+#                Opt-in: only useful for high-rate control loops, and it raises
+#                bus-integrity risk on this HAT's long traces. See config.py.
 set -euo pipefail
+
+I2C_FAST=0
+for arg in "$@"; do
+    case "$arg" in
+        --i2c-fast) I2C_FAST=1 ;;
+        -h|--help)  sed -n '2,9p' "$0"; exit 0 ;;
+        *) echo "unknown option: $arg (try --help)" >&2; exit 2 ;;
+    esac
+done
 
 # PKG is the package dir itself; the venv lives inside it, and the systemd unit's
 # WorkingDirectory is PKG's parent so that `import picar_freenove_fastapi` resolves.
@@ -16,6 +30,23 @@ if [ ! -e /dev/i2c-1 ]; then
     echo "==> Enabling I2C (reboot required afterwards)"
     sudo raspi-config nonint do_i2c 0
     NEED_REBOOT=1
+fi
+
+# I2C bus speed is a device-tree parameter fixed at boot — it cannot be set from
+# Python, so config.py's i2c_expected_hz only *checks* it. This is where it is
+# actually changed. Default (no dtparam line) is 100kHz.
+if [ "$I2C_FAST" = "1" ]; then
+    BOOTCFG=/boot/firmware/config.txt
+    [ -f "$BOOTCFG" ] || BOOTCFG=/boot/config.txt
+    if grep -q '^dtparam=i2c_arm_baudrate=400000' "$BOOTCFG"; then
+        echo "==> I2C fast mode already set in $BOOTCFG"
+    else
+        echo "==> Enabling I2C fast mode (400kHz) in $BOOTCFG (reboot required)"
+        sudo sed -i '/^dtparam=i2c_arm_baudrate=/d' "$BOOTCFG"
+        echo 'dtparam=i2c_arm_baudrate=400000' | sudo tee -a "$BOOTCFG" >/dev/null
+        NEED_REBOOT=1
+    fi
+    echo "    remember to set i2c_expected_hz = 400_000 in config.py"
 fi
 
 # SPI drives the WS2812 LED strip on SPI0 MOSI (GPIO10).

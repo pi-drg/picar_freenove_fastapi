@@ -21,7 +21,9 @@ class Robot:
         self._lock = threading.RLock()
         self._stop_timer: threading.Timer | None = None
 
-        self.pca = PCA9685(self.cfg.pca9685_address)
+        self.pca = PCA9685(self.cfg.pca9685_address,
+                           busnum=self.cfg.i2c_busnum,
+                           expected_hz=self.cfg.i2c_expected_hz)
         self.pca.set_pwm_freq(self.cfg.pwm_freq_hz)
         self.motors = Motors(self.pca, self.cfg)
         self.servos = Servos(self.pca, self.cfg)

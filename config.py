@@ -18,6 +18,26 @@ class BoardConfig:
     # --- PCA9685 (I2C PWM driver for motors + servos) ------------------------
     pca9685_address: int = 0x40
     pwm_freq_hz: int = 50
+    i2c_busnum: int = 1
+
+    # Expected I2C bus clock. This is DECLARATIVE — the bus speed is a
+    # device-tree parameter fixed at boot and cannot be set from Python. Changing
+    # this field alone does nothing; it only tells the driver what to expect so a
+    # mismatch is logged instead of silently costing you throughput.
+    #
+    # To actually switch to fast mode: `deploy/install.sh --i2c-fast` (or add
+    # `dtparam=i2c_arm_baudrate=400000` to /boot/firmware/config.txt), reboot,
+    # then set this to 400_000.
+    #
+    # Measured on picar-finland-01 (Pi Zero 2 W), full 8-channel motor update:
+    #     100 kHz, per-register writes  11.3 ms   <- pre-2026-08-05 behaviour
+    #     100 kHz, block write           3.4 ms   <- current, see PCA9685.set_pwm
+    #     400 kHz, block write          ~0.95 ms  (projected)
+    # Only worth changing if you need a high-rate control loop; at demo rates
+    # (one command per ~700 ms) the difference is invisible. Fast mode also
+    # raises bus-integrity risk on this HAT's long traces — if reads start
+    # failing intermittently after enabling it, that is the cause.
+    i2c_expected_hz: int = 100_000
 
     # Motor half-bridge channel pairs, per wheel. Each wheel is two PCA9685
     # channels; `fwd` is the channel driven with duty for FORWARD motion, `rev`
