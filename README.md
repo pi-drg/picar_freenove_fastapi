@@ -11,16 +11,19 @@ plaintext `CMD_X#...`) **and** the earlier shim that wrapped Freenove's classes.
 For a workshop this matters: attendees flash one package, not "clone Freenove +
 layer our shim on top of their import paths."
 
+> **Deploying this, or working on it with an agent?** Read **[AGENTS.md](AGENTS.md)**
+> first. It carries the safety rules, the step-by-step deploy, and the hardware
+> facts that were established on real hardware and contradict Freenove's
+> published values.
+
 ## Why own the drivers instead of wrapping Freenove's
 
 The only thing worth keeping from Freenove's drivers is the *board magic* — the
 wiring facts you can't guess and don't want to re-derive on real hardware:
 
 - Motor half-bridge channel map and the upper/lower forward-channel asymmetry,
-  plus active-brake on duty 0. Note the map in `config.py` is **globally inverted
-  from Freenove's published values** (LF=0/1, LR=3/2, RF=6/7, RR=4/5) — the
-  published pairs drove all four wheels backward on `forward`, verified on
-  hardware in both directions with the wheels raised.
+  plus active-brake on duty 0. The map in `config.py` is **globally inverted from
+  Freenove's published values** — see [AGENTS.md](AGENTS.md) §2 before touching it.
 - Servo calibration: pan (ch8) inverted `2500 - (angle+trim)/0.09`, tilt (ch9)
   `500 + (angle+trim)/0.09`, 1500us centre.
 - ADS7830 per-channel command byte and 3.3V/5.2V PCB-revision scaling.
@@ -45,6 +48,9 @@ picar_freenove_fastapi/
   robot.py             # Robot facade: one lock, auto-stop timer, lazy camera/LEDs
   server.py            # our FastAPI server (optional bearer-token auth)
   requirements.txt
+  deploy/              # installer + systemd unit
+  demos/               # operator shell demos (imported by nothing)
+  AGENTS.md            # deploy guide, safety rules, hardware ground truth
 ```
 
 The package is imported directly (`picar_freenove_fastapi.server:app`), so the
@@ -53,19 +59,18 @@ systemd unit's `WorkingDirectory` is its **parent** directory, not the package.
 ## Run (on the Pi)
 
 ```bash
-python3 -m venv .venv && . .venv/bin/activate
-pip install -r picar_freenove_fastapi/requirements.txt
-# picamera2 / lgpio via apt if not already present (see requirements.txt)
-
-# optional on-robot bearer token (defence in depth on the LAN)
-export ROBOT_TOKEN=$(openssl rand -hex 16)
-
+./deploy/install.sh                    # apt deps, I2C/SPI, venv, import check
 uvicorn picar_freenove_fastapi.server:app --host 127.0.0.1 --port 8080
 ```
 
-Bind to loopback; the gateway (same Pi, or over its authenticated tunnel) is the
-only client. The gateway's MCP auth + reservation is still the real trust
-boundary — `ROBOT_TOKEN` is a minimal extra guard, not a replacement.
+Run from the package's **parent** directory. For a systemd install and the
+`ROBOT_TOKEN` auth details, see [AGENTS.md](AGENTS.md) §3.
+
+Bind to loopback where the gateway shares the Pi; the gateway's MCP auth and
+reservation is the real trust boundary, and `ROBOT_TOKEN` is a minimal extra
+guard, not a replacement. If the gateway runs on another host you need
+`0.0.0.0` — set a token, or accept that anything on the network can drive the
+motors.
 
 ## Gateway wiring
 
@@ -135,14 +140,11 @@ curl -X POST localhost:8080/mecanum -H 'content-type: application/json' \
 `/drive` `"left"`/`"right"` also spin in place — they are differential presets, not
 strafes, and produce duties identical to `omega`.
 
-Verified 2026-08-04. On raised wheels, `vy` alone gives LF back / LR forward /
-RF forward / RR back — the correct diagonal signature, which also confirms wheel
-identity in `motor_channels`. Forward-only motion cannot test that: forward looks
-correct even if two wheels are swapped. On the floor, spin held its centre cleanly
-and strafe translated sideways in both directions.
-
-Strafing fights the rollers and needs more duty than driving — 1200 works on a
-hard floor, well above the ~700 unloaded stall floor.
+Verified on hardware 2026-08-04: spin held its centre cleanly and strafe
+translated sideways in both directions. Strafing fights the rollers and needs
+more duty than driving — 1200 on a hard floor, well above the ~700 unloaded
+stall floor. See [AGENTS.md](AGENTS.md) §5 for why the strafe test, and not a
+forward test, is what confirms wheel identity.
 
 ## I²C throughput
 
@@ -189,20 +191,29 @@ caller cannot leave the motors running. This is also why full Unified Autonomy
 Stack integration stops at behavioural mission tools (no odometry → no map).
 Add encoders or a Pi-I²C IMU to lift that ceiling.
 
-## Verified (off-hardware, with faked I²C/GPIO/camera)
+## Verified
+
+**Off-hardware** (faked I²C/GPIO/camera):
 
 - Package imports; `Robot` constructs.
-- Forward drive maps to the correct per-wheel forward channels (ch1/2/5/7 = duty,
-  partners = 0); stop applies active brake (both channels 4095) — matches
-  Freenove exactly.
+- Forward drive maps to the corrected per-wheel forward channels
+  (ch0/3/4/6 = duty, partners = 0); stop applies active brake (both channels
+  4095). Note this is the **inverted** map, not Freenove's published one.
 - Servo pulse widths match Freenove's formula within <1us across 0/90/180° for
   both pan (inverted) and tilt.
 - All 8 ADS7830 command bytes match; battery scaling correct (raw 200 → 8.16V @
   PCB v2).
 - Mecanum mixing correct for strafe and spin.
+- Batched PCA9685 writes are register-identical to the old per-wheel path across
+  507 input combinations.
 - Every FastAPI endpoint returns the adapter-expected shape; bearer-token auth
   rejects missing/bad tokens and accepts the right one.
 
-Hardware-in-the-loop calibration (servo centre trim, `duty` floor before stall,
-`pcb_version`) still needs a real car — those are the values in `config.py` to
-confirm on first bring-up.
+**On hardware** (picar-finland-01, Pi Zero 2 W): motor direction both ways with
+wheels raised, wheel identity via strafe, mecanum spin and strafe on the floor,
+servo travel and clamp, LED effects and direction, ADC battery reads, I²C
+throughput benchmarks, and autostart across a reboot.
+
+Still needs a real car on first bring-up of a *new* unit: servo centre trim,
+`duty` floor before stall, and `pcb_version`. Line sensors have only ever been
+observed on a light surface — never tested over a dark line.
