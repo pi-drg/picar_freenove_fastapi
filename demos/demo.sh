@@ -103,7 +103,29 @@ for ((i = 1; i <= $#; i += 2)); do
     fi
 done
 
-echo "robot=$HOST duty=$DUTY gap=${GAP_MS}ms${LEDS:+ leds=$LEDS}"
+# Strafing needs mecanum wheels. Ask the robot rather than assuming, and fail
+# before the first move instead of scrubbing the tyres halfway through.
+WHEELS="mecanum"
+if [ "$DRY_RUN" != "1" ]; then
+    INFO="$(curl -s --max-time 5 "http://$HOST/info" 2>/dev/null || true)"
+    case "$INFO" in
+        *'"wheels":"ordinary"'*) WHEELS="ordinary" ;;
+        *'"wheels":"mecanum"'*)  WHEELS="mecanum" ;;
+        '') echo "cannot reach the robot at $HOST" >&2; trap - EXIT; exit 1 ;;
+    esac
+fi
+if [ "$WHEELS" = "ordinary" ]; then
+    for ((i = 1; i <= $#; i += 2)); do
+        case "${!i}" in
+            left|right)
+                echo "'${!i}' strafes sideways, which needs mecanum wheels — this" >&2
+                echo "car has ordinary wheels fitted. Use cw/ccw to turn." >&2
+                trap - EXIT; exit 2 ;;
+        esac
+    done
+fi
+
+echo "robot=$HOST duty=$DUTY gap=${GAP_MS}ms wheels=$WHEELS${LEDS:+ leds=$LEDS}"
 
 if [ -n "$LEDS" ]; then
     post led "{\"effect\":\"$LEDS\",\"wait_ms\":80,\"reverse\":$LED_REVERSE}" >/dev/null

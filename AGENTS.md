@@ -76,9 +76,14 @@ example code or any older revision of the README.
 
 ### Mecanum sign convention
 
-The kit ships both ordinary and mecanum wheels. With mecanum fitted `/mecanum`
-is fully holonomic; with ordinary wheels `vy` is inert (scrub, not motion) while
-`vx` and `omega` still work. Check which the car has before promising a strafe.
+The kit ships both wheel sets. `config.wheel_type` (`"mecanum"` | `"ordinary"`)
+records which is fitted, and it is enforced: with `"ordinary"`, a non-zero `vy`
+raises ValueError in `Motors.mecanum` and returns **HTTP 400** from `/mecanum`,
+because plain wheels cannot translate sideways. `vx`, `omega` and `/drive` work
+on both.
+
+**Check `GET /info` (`wheels`, `holonomic`) before promising a strafe** — do not
+assume mecanum. Set it with the `wheels` selftest step.
 
 The convention matches ROS REP-103 exactly, which is why a ROS 2 bridge needs no
 sign juggling:

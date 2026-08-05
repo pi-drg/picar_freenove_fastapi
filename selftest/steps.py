@@ -119,7 +119,41 @@ def battery_step(cfg: BoardConfig) -> dict:
     return {"pcb_version": rev}
 
 
-# --- 3. servos ---------------------------------------------------------------
+# --- 3. wheels ---------------------------------------------------------------
+
+@step("wheels", "which wheel set is fitted (gates strafing)",
+      writes=("wheel_type",))
+def wheels_step(cfg: BoardConfig) -> dict:
+    say("The kit ships two wheel sets, and they are not interchangeable in")
+    say("software: only mecanum wheels can move the car sideways.\n")
+    say("  MECANUM   angled rollers around the rim, set at 45 degrees.")
+    say("            Look down at the car: the rollers form an X.")
+    say("  ORDINARY  plain rubber tyres, no rollers.\n")
+
+    idx = ask("Which wheels are fitted?",
+              ["mecanum (rollers at 45 degrees)",
+               "ordinary (plain tyres)",
+               "not sure"])
+    if idx == 2:
+        say("\n  Look at one wheel from the side. If the tread is made of small")
+        say("  barrel-shaped rollers set at an angle, they are mecanum.")
+        warn("left wheel_type unchanged")
+        return {}
+
+    wheel_type = "mecanum" if idx == 0 else "ordinary"
+    if wheel_type == "mecanum":
+        say()
+        note("  Rollers must form an X seen from above. Mounted wrong, a strafe")
+        note("  command comes out as rotation — the `mecanum` step checks this.")
+        ok("strafing enabled: /mecanum accepts vy")
+    else:
+        ok("strafing disabled: /mecanum rejects a non-zero vy with HTTP 400")
+        note("  vx and omega still work, and /drive is unaffected.")
+    wrote("wheel_type", wheel_type)
+    return {"wheel_type": wheel_type}
+
+
+# --- 4. servos ---------------------------------------------------------------
 
 @step("servos", "pan/tilt direction, travel and centring",
       writes=("servo_trim_deg", "servo_pan_inverted"))
@@ -196,7 +230,7 @@ def servos_step(cfg: BoardConfig) -> dict:
     return updates
 
 
-# --- 4. leds -----------------------------------------------------------------
+# --- 5. leds -----------------------------------------------------------------
 
 @step("leds", "strip colour order and index direction",
       writes=("led_color_order", "led_index_clockwise"))
@@ -251,7 +285,7 @@ def leds_step(cfg: BoardConfig) -> dict:
     return updates
 
 
-# --- 5. motors ---------------------------------------------------------------
+# --- 6. motors ---------------------------------------------------------------
 
 @step("motors", "identify each wheel and build the channel map",
       moves=True, writes=("motor_channels",))
@@ -343,7 +377,7 @@ def motors_step(cfg: BoardConfig) -> dict:
     return {"motor_channels": result}
 
 
-# --- 6. duty -----------------------------------------------------------------
+# --- 7. duty -----------------------------------------------------------------
 
 @step("duty", "find the duty where the wheels start turning",
       moves=True, writes=("duty_floor_unloaded",))
@@ -374,11 +408,16 @@ def duty_step(cfg: BoardConfig) -> dict:
     return {"duty_floor_unloaded": floor}
 
 
-# --- 7. mecanum --------------------------------------------------------------
+# --- 8. mecanum --------------------------------------------------------------
 
 @step("mecanum", "confirm strafing and roller orientation",
       on_floor=True)
 def mecanum_step(cfg: BoardConfig) -> dict:
+    if not cfg.holonomic:
+        warn(f"wheel_type is {cfg.wheel_type!r} — this car cannot strafe.")
+        say("  Nothing to test here. If it does have mecanum wheels fitted,")
+        say("  run the `wheels` step first.")
+        return {}
     say("Strafing tests something a forward test cannot: that each wheel is in")
     say("the right corner AND that the rollers form an X seen from above.")
     say("A wheel on the wrong corner makes 'strafe' come out as rotation.\n")
@@ -430,7 +469,7 @@ def mecanum_step(cfg: BoardConfig) -> dict:
     return {}
 
 
-# --- 8. ultrasonic -----------------------------------------------------------
+# --- 9. ultrasonic -----------------------------------------------------------
 
 @step("ultrasonic", "distance sensor responds to an obstacle")
 def ultrasonic_step(cfg: BoardConfig) -> dict:
@@ -459,7 +498,7 @@ def ultrasonic_step(cfg: BoardConfig) -> dict:
     return {}
 
 
-# --- 9. line -----------------------------------------------------------------
+# --- 10. line -----------------------------------------------------------------
 
 @step("line", "IR line sensor polarity over light and dark",
       writes=("line_active_high_on_dark",))
@@ -492,7 +531,7 @@ def line_step(cfg: BoardConfig) -> dict:
         line.close()
 
 
-# --- 10. camera --------------------------------------------------------------
+# --- 11. camera --------------------------------------------------------------
 
 @step("camera", "capture a frame and check it is a valid image")
 def camera_step(cfg: BoardConfig) -> dict:

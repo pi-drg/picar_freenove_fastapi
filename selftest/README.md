@@ -28,6 +28,7 @@ while it is running rather than fighting it for the hardware.
 |---|---|---|---|
 | `bus` | I²C, PCA9685, ADC, clock, write speed | — | anywhere |
 | `battery` | voltage plausible | `pcb_version` | anywhere |
+| `wheels` | which wheel set is fitted | `wheel_type` | anywhere |
 | `servos` | pan/tilt direction and travel | `servo_trim_deg`, `servo_pan_inverted` | anywhere |
 | `leds` | strip lights, colours correct | `led_color_order`, `led_index_clockwise` | anywhere |
 | `motors` | every wheel turns both ways | **`motor_channels`** | **wheels raised** |
@@ -38,7 +39,8 @@ while it is running rather than fighting it for the hardware.
 | `camera` | frame captured and valid | — | anywhere |
 
 Run them in listed order on a new car: `bus` and `battery` first (a flat battery
-makes every later step lie), then `motors` before `mecanum`.
+makes every later step lie), `wheels` before `mecanum` (it decides whether that
+step applies at all), and `motors` before `mecanum`.
 
 ## How `motors` works
 
@@ -50,6 +52,17 @@ forward and asks you to confirm before saving anything.
 If a wheel never moves, its lead is loose or the duty is below the stall floor.
 If two channels claim the same wheel and direction, nothing is saved and you
 re-run — a partial map is worse than none.
+
+## Ordinary vs mecanum wheels
+
+The `wheels` step asks which set you fitted and writes `wheel_type`. With
+`"ordinary"`, strafing is disabled everywhere: `Motors.mecanum` raises on a
+non-zero `vy`, `/mecanum` returns HTTP 400, and `demos/demo.sh` refuses a
+sequence containing `left` or `right`. `vx`, `omega` and `/drive` are unaffected,
+and the `mecanum` step skips itself with a note.
+
+Run this before `mecanum`, or you will be asked to test a manoeuvre the car
+cannot perform.
 
 ## Why `mecanum` matters
 

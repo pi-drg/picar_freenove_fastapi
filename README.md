@@ -142,12 +142,31 @@ smoothly during driving, with no stutter.
 
 ## Mecanum wheels
 
-The kit ships with both ordinary and mecanum wheels. **With mecanum wheels
-fitted, `/mecanum` is fully holonomic; with ordinary wheels, `vy` does nothing
-useful** — the mixing still runs, but the wheels cannot translate sideways, so
-you get scrub and noise instead of motion. `vx` and `omega` work either way.
+The kit ships both wheel sets, and `config.wheel_type` tells the software which
+you fitted:
 
-Sign convention, from the driver's seat facing forward:
+| `wheel_type` | `vx` | `vy` (strafe) | `omega` |
+|---|---|---|---|
+| `"mecanum"` | yes | **yes** — fully holonomic | yes |
+| `"ordinary"` | yes | **rejected, HTTP 400** | yes |
+
+Ordinary wheels physically cannot translate sideways, so rather than scrub the
+tyres and pretend, a non-zero `vy` is refused:
+
+```console
+$ curl -X POST localhost:8080/mecanum -d '{"vy":1200}' -H 'content-type: application/json'
+{"detail":"vy=1200 requires mecanum wheels, but wheel_type is 'ordinary' —
+ this car cannot move sideways. Use vx/omega, or /drive, for ordinary wheels."}
+```
+
+`vx` and `omega` still work — the mixing degenerates to differential drive, which
+is correct for plain wheels — and `/drive` is unaffected. `GET /info` reports
+`wheels` and `holonomic` so a client can check before commanding a strafe, and
+`demos/demo.sh` refuses a strafe sequence up front rather than failing mid-run.
+
+Set it with `python -m picar_freenove_fastapi.selftest wheels`.
+
+Sign convention with mecanum wheels, from the driver's seat facing forward:
 
 | Axis | Positive means |
 |---|---|

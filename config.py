@@ -63,6 +63,24 @@ class BoardConfig:
     # failing intermittently after enabling it, that is the cause.
     i2c_expected_hz: int = 100_000
 
+    # --- Wheels (per-unit) ---------------------------------------------------
+    # "mecanum" or "ordinary". The kit ships both sets, and which you fitted
+    # changes what the car can physically do:
+    #
+    #   mecanum   X-roller wheels. Fully holonomic — vx, vy and omega all work,
+    #             so the car can strafe sideways without changing heading.
+    #   ordinary  Plain rubber wheels. NO lateral motion is possible; vx and
+    #             omega work, vy does not. Commanding vy just scrubs the tyres.
+    #
+    # With "ordinary", Motors.mecanum rejects a non-zero vy rather than pretending
+    # to strafe, and /mecanum returns HTTP 400 for it. Set this via the `wheels`
+    # selftest step, or by hand in the per-unit overlay.
+    #
+    # Default is "mecanum" only because that is what the reference car has; it is
+    # not a claim about your kit. If you fitted the ordinary wheels, say so —
+    # otherwise strafe commands will look accepted and do nothing useful.
+    wheel_type: str = "mecanum"
+
     # Motor half-bridge channel pairs, per wheel. Each wheel is two PCA9685
     # channels; `fwd` is the channel driven with duty for FORWARD motion, `rev`
     # the other. Ported verbatim from Freenove Ordinary_Car — the upper/lower
@@ -162,6 +180,20 @@ class BoardConfig:
     # polarities; the selftest determines which you have.
     line_active_high_on_dark: bool = True
 
+    WHEEL_TYPES = ("mecanum", "ordinary")
+
+    @property
+    def holonomic(self) -> bool:
+        """True when the car can translate sideways (mecanum wheels fitted)."""
+        return self.wheel_type == "mecanum"
+
+    def __post_init__(self) -> None:
+        if self.wheel_type not in self.WHEEL_TYPES:
+            raise ValueError(
+                f"wheel_type must be one of {self.WHEEL_TYPES}, got "
+                f"{self.wheel_type!r}"
+            )
+
     # --- Per-unit overlay ----------------------------------------------------
     @classmethod
     def load(cls, path: Path | str | None = None) -> "BoardConfig":
@@ -193,6 +225,12 @@ class BoardConfig:
             elif key in _TUPLE_FIELDS and isinstance(value, list):
                 value = tuple(value)
             setattr(cfg, key, value)
+        # setattr bypasses __post_init__, so re-validate what the overlay set.
+        if cfg.wheel_type not in cls.WHEEL_TYPES:
+            log.warning("unit config %s: wheel_type=%r is not one of %s — "
+                        "falling back to %r", p, cfg.wheel_type, cls.WHEEL_TYPES,
+                        cls.wheel_type)
+            cfg.wheel_type = cls.wheel_type
         log.info("applied unit config from %s (%d fields)", p, len(data))
         return cfg
 

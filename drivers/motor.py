@@ -85,24 +85,32 @@ class Motors:
     def mecanum(self, vx: int, vy: int, omega: int) -> tuple:
         """Holonomic mixing for the mecanum build (X-roller layout).
 
-        This car HAS mecanum wheels fitted, so all three axes are real. (The
-        upstream README claimed vy was inert — true only for the ordinary-wheel
-        kit, not for this build.)
-
-        Sign convention, all confirmed on the floor 2026-08-04, from the driver's
-        seat facing forward:
+        Sign convention, from the driver's seat facing forward:
             vx    > 0  drive forward
             vy    > 0  strafe LEFT
             omega > 0  spin counter-clockwise, in place
 
-        Also verified with wheels raised: vy alone gives LF back / LR forward /
-        RF forward / RR back — the correct diagonal signature, which confirms
-        wheel identity in motor_channels. Forward-only motion cannot catch that
-        class of error, since every wheel turns forward either way.
+        Matches ROS REP-103, so a ROS 2 bridge needs no sign juggling.
+
+        ORDINARY WHEELS: lateral motion is physically impossible, so a non-zero
+        `vy` raises ValueError rather than scrubbing the tyres and pretending.
+        `vx` and `omega` still work — the mixing degenerates to differential
+        drive, which is exactly right for plain wheels. Set cfg.wheel_type.
+
+        Verified on mecanum hardware with wheels raised: vy alone gives LF back /
+        LR forward / RF forward / RR back — the correct diagonal signature, which
+        confirms wheel identity in motor_channels. Forward-only motion cannot
+        catch that class of error, since every wheel turns forward either way.
 
         Strafing fights the rollers, so it needs more duty than driving: 1200
         works on a hard floor, well above the ~700 unloaded stall floor.
         """
+        if vy and not self.cfg.holonomic:
+            raise ValueError(
+                f"vy={vy} requires mecanum wheels, but wheel_type is "
+                f"{self.cfg.wheel_type!r} — this car cannot move sideways. "
+                "Use vx/omega, or /drive, for ordinary wheels."
+            )
         lf = _clamp(vx - vy - omega)
         lr = _clamp(vx + vy - omega)
         rf = _clamp(vx + vy + omega)

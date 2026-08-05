@@ -100,7 +100,16 @@ class LedReq(BaseModel):
 async def info():
     r = get_robot()
     volts = await asyncio.to_thread(r.battery)
-    return {"robot": "freenove-4wd", "hardware": "ok", "battery_v": volts}
+    # `wheels` and `holonomic` are ADDITIONS to the adapter contract, not changes
+    # — existing clients read the three keys below and ignore the rest. They let
+    # a client discover whether strafing is possible before commanding it.
+    return {
+        "robot": "freenove-4wd",
+        "hardware": "ok",
+        "battery_v": volts,
+        "wheels": r.cfg.wheel_type,
+        "holonomic": r.cfg.holonomic,
+    }
 
 
 @app.post("/drive", dependencies=[Depends(auth)])
@@ -112,7 +121,11 @@ async def drive(req: DriveReq):
 @app.post("/mecanum", dependencies=[Depends(auth)])
 async def mecanum(req: MecanumReq):
     r = get_robot()
-    return await asyncio.to_thread(r.mecanum, req.vx, req.vy, req.omega, req.duration_ms)
+    try:
+        return await asyncio.to_thread(
+            r.mecanum, req.vx, req.vy, req.omega, req.duration_ms)
+    except ValueError as exc:  # vy commanded on a car with ordinary wheels
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.post("/look", dependencies=[Depends(auth)])
