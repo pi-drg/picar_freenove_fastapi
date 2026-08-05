@@ -80,8 +80,10 @@ class LedReq(BaseModel):
     only); omitted means the whole strip. `duration_ms` bounds an animation, after
     which the strip goes dark — omit it to run until the next /led call.
 
-    `reverse` flips travel direction for `chase` and `rainbow`. On this car
-    ascending pixel index runs clockwise, so reverse=true is counter-clockwise.
+    `reverse` flips travel direction for `chase` and `rainbow`. Which way that is
+    depends on how the strip is fitted (see config.led_index_clockwise); by
+    default ascending pixel index runs clockwise, so reverse=true is
+    counter-clockwise.
     """
     effect: str = "solid"
     r: int = 0

@@ -126,8 +126,10 @@ Here each runs on a daemon thread instead. `duration_ms` bounds a run and leaves
 the strip dark; omit it and the effect runs until the next `/led` call. Brightness
 defaults to Freenove's cap of 55/255 — these LEDs are bright.
 
-**Direction.** On this car the strip is wired so ascending pixel index travels
-**clockwise**. `chase` and `rainbow` take `reverse` to flip that:
+**Direction.** Per-unit: the packaged default assumes ascending pixel index
+travels **clockwise**, but a strip fitted the other way round runs the opposite
+way. `led_index_clockwise` records which you have — the `leds` selftest step
+determines it. `chase` and `rainbow` take `reverse` to flip direction:
 
 ```bash
 curl -X POST localhost:8080/led -H 'content-type: application/json' \
@@ -138,10 +140,14 @@ Animations run on their own thread against SPI, while motors and sensors are on
 I2C behind a separate lock — verified on hardware that lighting keeps animating
 smoothly during driving, with no stutter.
 
-## This car: mecanum wheels
+## Mecanum wheels
 
-Mecanum wheels are fitted, so `/mecanum` is fully holonomic. Sign convention, all
-confirmed on the floor, from the driver's seat facing forward:
+The kit ships with both ordinary and mecanum wheels. **With mecanum wheels
+fitted, `/mecanum` is fully holonomic; with ordinary wheels, `vy` does nothing
+useful** — the mixing still runs, but the wheels cannot translate sideways, so
+you get scrub and noise instead of motion. `vx` and `omega` work either way.
+
+Sign convention, from the driver's seat facing forward:
 
 | Axis | Positive means |
 |---|---|
@@ -159,7 +165,12 @@ curl -X POST localhost:8080/mecanum -H 'content-type: application/json' \
 ```
 
 `/drive` `"left"`/`"right"` also spin in place — they are differential presets, not
-strafes, and produce duties identical to `omega`.
+strafes, and produce duties identical to `omega`. These work on ordinary wheels
+too.
+
+Mecanum wheels must be mounted with the rollers forming an **X** seen from above.
+Mounted wrong, a strafe command comes out as rotation — the `mecanum` selftest
+step is what detects that.
 
 Verified on hardware 2026-08-04: spin held its centre cleanly and strafe
 translated sideways in both directions. Strafing fights the rollers and needs
@@ -175,7 +186,8 @@ batched: `set_pwm` sends one channel's four registers in a single transaction,
 and `Motors.set` sends **all eight channels — the whole motor state — in one**.
 The address, register and framing overhead is paid once instead of 32 times.
 
-Measured on picar-finland-01 (Pi Zero 2 W, 100 kHz bus), full 8-channel update:
+Full 8-channel update at a 100 kHz bus. These are bus-bound rather than
+CPU-bound, so they hold across Pi models:
 
 | | Transactions | Per update | Ceiling |
 |---|---|---|---|
@@ -230,7 +242,7 @@ Add encoders or a Pi-I²C IMU to lift that ceiling.
 - Every FastAPI endpoint returns the adapter-expected shape; bearer-token auth
   rejects missing/bad tokens and accepts the right one.
 
-**On hardware** (picar-finland-01, Pi Zero 2 W): motor direction both ways with
+**On hardware** (the reference car): motor direction both ways with
 wheels raised, wheel identity via strafe, mecanum spin and strafe on the floor,
 servo travel and clamp, LED effects and direction, ADC battery reads, I²C
 throughput benchmarks, and autostart across a reboot.

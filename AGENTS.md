@@ -34,16 +34,16 @@ If you are unsure whether something moves the car, it moves the car.
 
 ## 2. Hardware ground truth
 
-> **Scope: these are `picar-finland-01`'s values, not universal facts.** A kit
+> **Scope: these are the reference car's values, not universal facts.** A kit
 > assembled differently — motors in different ports, LED strip fitted the other
 > way round, different PCB revision — will legitimately differ. The packaged
 > defaults are one calibrated car, and a reasonable starting guess for a kit
 > built the same way.
 >
 > **On a car you have not calibrated, run the selftest rather than trusting this
-> section:** `python -m picar_freenove_fastapi.selftest --all` (see §2b). On
-> `picar-finland-01`, trust this over any external document, including the
-> original deployment brief.
+> section:** `python -m picar_freenove_fastapi.selftest --all` (see §2b). On a
+> car that has been calibrated against these values, trust this over any external
+> document, including a deployment brief.
 
 Each of these was established on real hardware and contradicts either Freenove's
 published values or the naive reading of the code. Re-deriving them costs a
@@ -76,8 +76,12 @@ example code or any older revision of the README.
 
 ### Mecanum sign convention
 
-Mecanum wheels are fitted; `/mecanum` is fully holonomic. This matches ROS
-REP-103 exactly, which is why a ROS 2 bridge needs no sign juggling:
+The kit ships both ordinary and mecanum wheels. With mecanum fitted `/mecanum`
+is fully holonomic; with ordinary wheels `vy` is inert (scrub, not motion) while
+`vx` and `omega` still work. Check which the car has before promising a strafe.
+
+The convention matches ROS REP-103 exactly, which is why a ROS 2 bridge needs no
+sign juggling:
 
 | Axis | Positive means |
 |---|---|
@@ -86,6 +90,9 @@ REP-103 exactly, which is why a ROS 2 bridge needs no sign juggling:
 | `omega` | spin **counter-clockwise** in place |
 
 ### Duty floors
+
+Per-unit — motors, battery health and surface all move these. The `duty`
+selftest step measures them for a given car.
 
 - Wheels raised: ~500 stalls, ~700 turns.
 - On the floor, strafing fights the rollers and needs **~1200** — the raised-wheel
@@ -96,8 +103,10 @@ REP-103 exactly, which is why a ROS 2 bridge needs no sign juggling:
 ### LEDs
 
 Eight WS2812s on **SPI0 MOSI (GPIO10) — SPI, not I²C**, so lighting never
-contends with motor writes. Ascending pixel index travels **clockwise**;
-`reverse: true` gives counter-clockwise.
+contends with motor writes. Strip orientation is per-unit: the default assumes
+ascending pixel index travels **clockwise**, so `reverse: true` gives
+counter-clockwise. `led_index_clockwise` records it; the `leds` selftest step
+determines it.
 
 ---
 
@@ -129,8 +138,10 @@ outside the repo. See `selftest/README.md`.
 
 ## 3. Deploying to a Pi
 
-Target: Raspberry Pi OS / Debian Bookworm or Trixie. Validated on a Pi Zero 2 W
-(415 MB RAM, Debian 13, Python 3.13.5, aarch64).
+Target: any Raspberry Pi running Raspberry Pi OS / Debian Bookworm or Trixie,
+with the Freenove 4WD HAT fitted. Nothing here assumes a particular Pi model —
+the package is I/O-bound, not CPU-bound. On the smallest boards allow extra time
+for first start (uvicorn can take ~5 s to bind).
 
 ### 3.1 Copy the package
 

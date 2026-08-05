@@ -5,9 +5,10 @@ the timing is encoded into the SPI bitstream itself: every colour bit becomes on
 SPI byte, 0xF8 (long high pulse) for a '1' and 0x80 (short high pulse) for a '0',
 clocked at 6.4MHz so each byte spans ~1.25us. That is the whole trick.
 
-Board facts ported from Freenove's spi_ledpixel.py and params.json: this car is
-Connect_Version 2, which selects the SPI path with GRB ordering and a brightness
-cap of 55. The bit patterns, clock rate and colour-order table are theirs; the
+Board facts ported from Freenove's spi_ledpixel.py and params.json: the packaged
+defaults assume Connect_Version 2, which selects the SPI path with GRB ordering
+and a brightness cap of 55. A board wired otherwise needs a different
+led_color_order — the `leds` selftest step determines it. The bit patterns, clock rate and colour-order table are theirs; the
 encoding is reimplemented in pure Python because 8 LEDs is 192 bytes and numpy
 buys nothing at that size.
 
@@ -130,8 +131,9 @@ class Leds:
         """Start an animation on a daemon thread.
 
         `reverse` flips travel direction for the two directional effects, `chase`
-        and `rainbow`. On this car the LEDs are wired so ascending pixel index
-        runs CLOCKWISE, so reverse=True gives counter-clockwise.
+        and `rainbow`. Which way that is depends on how the strip is fitted; the
+        default assumes ascending pixel index runs CLOCKWISE, so reverse=True
+        gives counter-clockwise. See cfg.led_index_clockwise.
         """
         if name not in EFFECTS:
             raise ValueError(f"Unknown effect '{name}'. Known: {list(EFFECTS)}")

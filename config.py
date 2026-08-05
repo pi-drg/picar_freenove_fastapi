@@ -52,7 +52,8 @@ class BoardConfig:
     # `dtparam=i2c_arm_baudrate=400000` to /boot/firmware/config.txt), reboot,
     # then set this to 400_000.
     #
-    # Measured on picar-finland-01 (Pi Zero 2 W), full 8-channel motor update:
+    # Full 8-channel motor update. These are bus-bound, not CPU-bound, so they
+    # hold across Pi models; what changes them is the bus clock:
     #     100 kHz, per-register writes  11.3 ms   <- pre-2026-08-05 behaviour
     #     100 kHz, block write           3.4 ms   <- current, see PCA9685.set_pwm
     #     400 kHz, block write          ~0.95 ms  (projected)
@@ -67,10 +68,16 @@ class BoardConfig:
     # the other. Ported verbatim from Freenove Ordinary_Car — the upper/lower
     # asymmetry is real (upper wheels forward on the high channel, lower on the
     # low channel).                        (fwd_channel, rev_channel)
-    # Corrected on hardware 2026-08-04 (picar-finland-01): the ported map drove
-    # all four wheels backward on `forward`, and forward on `back` — a clean
-    # global inversion, verified by testing both directions with wheels raised.
-    # Every pair is swapped from Freenove's published values.
+    # Corrected on hardware: the ported map drove all four wheels backward on
+    # `forward`, and forward on `back` — a clean global inversion, verified by
+    # testing both directions with wheels raised. Every pair is swapped from
+    # Freenove's published values.
+    #
+    # PER-UNIT. This is the reference car's wiring and a sensible starting guess,
+    # NOT a universal fact — a kit with the motor leads in different ports needs
+    # a different map. Do not hand-edit this to match another car; run
+    # `python -m picar_freenove_fastapi.selftest motors`, which derives the map
+    # from the hardware and writes it to the per-unit overlay.
     motor_channels: dict = field(default_factory=lambda: {
         "left_front":  (0, 1),   # LU: ch0=fwd, ch1=rev
         "left_rear":   (3, 2),   # LL: ch3=fwd, ch2=rev
@@ -78,9 +85,10 @@ class BoardConfig:
         "right_rear":  (4, 5),   # RL: ch4=fwd, ch5=rev
     })
 
-    # Advisory only — nothing reads this. Measured 2026-08-04 on picar-finland-01
-    # with the wheels RAISED: duty 500 stalled, 700 turned them. On the ground,
-    # under the car's own weight, the real floor will be higher than this.
+    # Advisory only — nothing reads this. Measured on the reference car with the
+    # wheels RAISED: duty 500 stalled, 700 turned them. On the ground, under the
+    # car's own weight, the real floor is higher. Per-unit; the `duty` selftest
+    # step measures it for your car.
     duty_floor_unloaded: int = 700
 
     # --- Servos (also on the PCA9685, channels 8-15) -------------------------
