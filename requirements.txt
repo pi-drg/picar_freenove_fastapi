@@ -1,0 +1,12 @@
+# Light deps only — installed by pip into a --system-site-packages venv.
+#
+# picamera2, lgpio and spidev must come from apt, NOT pip:
+#   sudo apt install -y python3-picamera2 python3-lgpio python3-spidev
+# picamera2 is bound to the system libcamera build, lgpio has no Python 3.13
+# wheel on PyPI (Trixie), and spidev is a compiled extension. gpiozero needs
+# lgpio for the ultrasonic + line sensors; the WS2812 LED strip needs spidev.
+
+fastapi
+uvicorn
+pydantic
+smbus2

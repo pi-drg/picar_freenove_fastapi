@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# lgpio notify FIFOs — created in the process working directory at runtime
+.lgd-nfy*
+
+# Local editor / OS noise
+.vscode/
+.idea/
+.DS_Store

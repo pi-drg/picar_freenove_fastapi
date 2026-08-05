@@ -1,0 +1,34 @@
+[Unit]
+Description=YakRobot Freenove 4WD robot control server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=drg
+Group=drg
+SupplementaryGroups=i2c gpio video
+WorkingDirectory=/home/drg/source
+EnvironmentFile=/etc/yakrobot/env
+# Topology A: the gateway runs on another host, so this binds all interfaces.
+# If the gateway runs on this same Pi, prefer --host 127.0.0.1 below.
+#
+# AUTH: server.py requires `Authorization: Bearer <token>` on every request when
+# ROBOT_TOKEN is set in /etc/yakrobot/env, and skips the check entirely when it
+# is unset. Unset means ANY host that can reach this port can drive the motors,
+# move the servos and read the camera — only reasonable on a trusted network,
+# and only in combination with the gateway being the real trust boundary.
+#
+# Gotcha: ROBOT_TOKEN= (empty) does NOT disable auth. os.getenv returns "", not
+# None, so the check stays on and demands the literal string "Bearer ". To
+# disable it the line must be ABSENT from the environment file.
+#
+# Binding 0.0.0.0 without a token exposes an unauthenticated motor endpoint.
+# Set ROBOT_TOKEN, or bind loopback, before this car joins any untrusted network.
+ExecStart=/home/drg/source/picar_freenove_fastapi/.venv/bin/uvicorn picar_freenove_fastapi.server:app \
+    --host 0.0.0.0 --port 8080 --workers 1
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
