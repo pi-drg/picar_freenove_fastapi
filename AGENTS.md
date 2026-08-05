@@ -136,6 +136,12 @@ it energises one PCA9685 channel at a time and asks which wheel moved and which
 way, then validates the derived map and asks for a confirming forward run before
 saving. This is what replaces "trust the map in `config.py`" on an unknown car.
 
+Bursts run at duty 900 for 1.5 s, preceded by a lead-in and countdown (~4.8 s,
+because the operator's eyes are on the keyboard when they press Enter), and every
+question offers a replay. If the operator says they could not tell, **replay
+rather than letting them guess** — a wrong answer here is silent and poisons
+everything downstream. `--probe-duty`, `--probe-ms` and `--lead-ms` tune it.
+
 `config.py` stays the packaged default; per-car values live in the overlay,
 outside the repo. See `selftest/README.md`.
 

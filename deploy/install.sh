@@ -49,6 +49,15 @@ if [ "$I2C_FAST" = "1" ]; then
     echo "    remember to set i2c_expected_hz = 400_000 in config.py"
 fi
 
+# Per-unit calibration lives outside the repo, next to the env file. Create it
+# owned by this user so the selftest can save without sudo — /etc/yakrobot itself
+# stays root-owned because env holds the bearer token.
+if [ ! -e /etc/yakrobot/unit.json ]; then
+    echo "==> Creating /etc/yakrobot/unit.json (per-unit calibration, writable by $USER)"
+    printf '{}\n' | sudo install -D -m644 -o "$USER" -g "$USER" /dev/stdin \
+        /etc/yakrobot/unit.json
+fi
+
 # SPI drives the WS2812 LED strip on SPI0 MOSI (GPIO10).
 if [ ! -e /dev/spidev0.0 ]; then
     echo "==> Enabling SPI (reboot required afterwards)"

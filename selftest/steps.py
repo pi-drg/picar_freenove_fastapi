@@ -16,15 +16,15 @@ from dataclasses import replace
 from ..config import BoardConfig
 from ..drivers import ADC, Camera, LineArray, Leds, Motors, PCA9685, Servos, Ultrasonic
 from ..drivers.pca9685 import bus_clock_hz
-from .runner import ask, confirm, fail, note, ok, pause, say, step, warn, wrote
+from .runner import (PROBE, ask, ask_replay, confirm, countdown, fail, note, ok,
+                     pause, say, step, warn, wrote)
 
 WHEELS = ("left_front", "left_rear", "right_front", "right_rear")
 WHEEL_LABEL = {
     "left_front": "LEFT FRONT", "left_rear": "LEFT REAR",
     "right_front": "RIGHT FRONT", "right_rear": "RIGHT REAR",
 }
-PROBE_DUTY = 1800      # enough to turn a raised wheel unambiguously
-PROBE_MS = 900
+
 
 
 def _pca(cfg: BoardConfig) -> PCA9685:
@@ -292,8 +292,11 @@ def leds_step(cfg: BoardConfig) -> dict:
 def motors_step(cfg: BoardConfig) -> dict:
     say("This drives ONE PCA9685 channel at a time and asks what moved.")
     say("It assumes nothing about your wiring — the map is built from answers.\n")
-    say(f"Each burst is {PROBE_MS} ms at duty {PROBE_DUTY}.")
+    say(f"Each burst is {PROBE['ms']} ms at duty {PROBE['duty']} — deliberately")
+    say("slow, so you can read the DIRECTION rather than just see movement.")
     note("Forward = the wheel's top surface moves toward the FRONT of the car.")
+    note("You can replay any burst as many times as you like.")
+    note("If a wheel stalls instead of turning, re-run with --probe-duty 1200.")
     pause()
 
     p = _pca(cfg)
@@ -305,13 +308,17 @@ def motors_step(cfg: BoardConfig) -> dict:
     try:
         for ch in range(n_channels):
             say(f"\n{'-' * 52}\nChannel {ch} of {n_channels - 1}")
-            duties = [0] * n_channels
-            duties[ch] = PROBE_DUTY
-            p.set_all_duties(duties)
-            time.sleep(PROBE_MS / 1000)
-            p.set_all_duties([0] * n_channels)
 
-            idx = ask("Which wheel turned, and which way?", options)
+            def burst(ch=ch):
+                countdown()
+                duties = [0] * n_channels
+                duties[ch] = PROBE["duty"]
+                p.set_all_duties(duties)
+                time.sleep(PROBE["ms"] / 1000)
+                p.set_all_duties([0] * n_channels)
+
+            burst()
+            idx = ask_replay("Which wheel turned, and which way?", options, burst)
             if idx == len(options) - 1:
                 warn(f"channel {ch} did nothing — noted")
                 continue
@@ -362,12 +369,18 @@ def motors_step(cfg: BoardConfig) -> dict:
         p.close()
         return {}
 
-    say("\nVerifying: all four wheels forward for 1 second.")
+    say("\nVerifying: all four wheels forward together.")
     motors = Motors(p, replace(cfg, motor_channels=result))
-    motors.set(PROBE_DUTY, PROBE_DUTY, PROBE_DUTY, PROBE_DUTY)
-    time.sleep(1.0)
-    motors.stop()
-    good = confirm("Did ALL FOUR wheels turn as if driving forward?")
+
+    def forward_burst():
+        countdown()
+        motors.set(*([PROBE["duty"]] * 4))
+        time.sleep(PROBE["ms"] / 1000)
+        motors.stop()
+
+    forward_burst()
+    good = ask_replay("Did ALL FOUR wheels turn as if driving forward?",
+                      ["yes", "no"], forward_burst) == 0
     p.close()
     if not good:
         fail("Map rejected — not saved. Re-run and check the direction answers.")
@@ -435,13 +448,19 @@ def mecanum_step(cfg: BoardConfig) -> dict:
             ("spin CCW",     (0, 0, duty),  "turned counter-clockwise on the spot"),
         ):
             say(f"\n  {label} ...")
-            motors.mecanum(vx, vy, omega)
-            time.sleep(0.8)
-            motors.stop()
-            time.sleep(0.5)
-            idx = ask(f"What did the car do?",
-                      [expect, "the opposite direction", "rotated instead of sliding",
-                       "barely moved", "something else"])
+
+            def move(vx=vx, vy=vy, omega=omega):
+                countdown("watch the car", 3)
+                motors.mecanum(vx, vy, omega)
+                time.sleep(0.8)
+                motors.stop()
+                time.sleep(0.5)
+
+            move()
+            idx = ask_replay("What did the car do?",
+                             [expect, "the opposite direction",
+                              "rotated instead of sliding", "barely moved",
+                              "something else"], move)
             results.append((label, idx))
     finally:
         motors.stop()

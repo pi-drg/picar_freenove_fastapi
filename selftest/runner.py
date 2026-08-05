@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,6 +16,11 @@ from typing import Callable
 from ..config import BoardConfig, unit_config_path
 
 SERVICE = "yakrobot-freenove"
+
+# Motion probe: slow enough to READ the direction, not just see movement. The
+# unloaded stall floor is around 700, so ~900 turns a raised wheel lazily. Both
+# are overridable with --probe-duty / --probe-ms.
+PROBE = {"duty": 900, "ms": 1500, "lead_ms": 1800}
 
 
 # --- terminal helpers --------------------------------------------------------
@@ -66,6 +73,36 @@ def ask(prompt: str, options: list[str]) -> int:
         if raw.isdigit() and 1 <= int(raw) <= len(options):
             return int(raw) - 1
         say(f"  {C.R}enter a number between 1 and {len(options)}{C.X}")
+
+
+def ask_replay(prompt: str, options: list[str], replay) -> int:
+    """Like ask(), plus a 'show me again' entry that re-runs `replay`.
+
+    Nobody catches a 1.5 s wheel spin every time, and guessing corrupts the
+    calibration silently. Repeating is free; a wrong answer is not.
+    """
+    again = "show me that again"
+    while True:
+        idx = ask(prompt, [*options, again])
+        if idx < len(options):
+            return idx
+        replay()
+
+
+def countdown(text: str = "watch the wheels", secs: int = 3) -> None:
+    """Give the operator time to look up before something moves.
+
+    The lead-in matters: the operator has just pressed Enter, so their eyes are
+    on the keyboard, not the car. Counting down from the instant of the keypress
+    means they miss the start of the motion — which is exactly the part that
+    tells them the direction.
+    """
+    print(f"{C.DIM}  look up — {text}{C.X}", end="", flush=True)
+    time.sleep(PROBE["lead_ms"] / 1000)
+    for n in range(secs, 0, -1):
+        print(f" {n}", end="", flush=True)
+        time.sleep(1)
+    print(f" {C.B}now{C.X}", flush=True)
 
 
 def confirm(prompt: str) -> bool:
@@ -133,9 +170,11 @@ def save_unit(path: Path, updates: dict) -> None:
     except PermissionError:
         tmp = Path("/tmp/unit.json")
         tmp.write_text(body)
+        user = getpass.getuser()
         warn(f"no permission to write {path}")
-        say(f"  wrote {tmp} instead. Install it with:")
-        say(f"    {C.B}sudo install -D -m644 {tmp} {path}{C.X}")
+        say("  Wrote it to a temporary file instead. Install it — the -o/-g keep")
+        say("  it writable, so later steps save without this detour:")
+        say(f"    {C.B}sudo install -D -m644 -o {user} -g {user} {tmp} {path}{C.X}")
         return
     say(f"\n{C.G}saved {path}{C.X}")
 
@@ -232,11 +271,27 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--all", action="store_true", help="run every step in order")
     ap.add_argument("--show", action="store_true", help="print the unit config")
     ap.add_argument("--config", metavar="PATH", help="unit config path override")
+    ap.add_argument("--probe-duty", type=int, metavar="N",
+                    help=f"motor duty used by probing steps "
+                         f"(default {PROBE['duty']}; raise it if a wheel stalls)")
+    ap.add_argument("--probe-ms", type=int, metavar="MS",
+                    help=f"how long each probe burst runs "
+                         f"(default {PROBE['ms']})")
+    ap.add_argument("--lead-ms", type=int, metavar="MS",
+                    help=f"pause after your keypress before the countdown "
+                         f"starts (default {PROBE['lead_ms']})")
     ap.add_argument("--no-color", action="store_true")
     args = ap.parse_args(argv)
 
     if args.no_color or not sys.stdout.isatty():
         C.off()
+
+    if args.probe_duty:
+        PROBE["duty"] = max(300, min(4095, args.probe_duty))
+    if args.probe_ms:
+        PROBE["ms"] = max(200, min(5000, args.probe_ms))
+    if args.lead_ms is not None:
+        PROBE["lead_ms"] = max(0, min(10000, args.lead_ms))
 
     path = Path(args.config) if args.config else unit_config_path()
 

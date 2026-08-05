@@ -49,6 +49,19 @@ time and asks which wheel moved and which way. Eight questions later it has the
 complete map, checks it for gaps and duplicates, then drives all four wheels
 forward and asks you to confirm before saving anything.
 
+Every burst runs at duty 900 for 1.5 s — deliberately slow, because you need to
+read the *direction*, not just notice movement. You get ~4.8 s of warning first
+(a pause to look up from the keyboard, then a 3-2-1), and **every question has a
+"show me that again" option**, so a missed burst costs a keypress rather than a
+guess. Guessing corrupts the calibration silently, which is much worse.
+
+```bash
+# a stiff drivetrain may stall at 900 — give it more
+python -m picar_freenove_fastapi.selftest --probe-duty 1200 motors
+python -m picar_freenove_fastapi.selftest --probe-ms 2500 motors
+python -m picar_freenove_fastapi.selftest --lead-ms 3000 motors   # slower lead-in
+```
+
 If a wheel never moves, its lead is loose or the duty is below the stall floor.
 If two channels claim the same wheel and direction, nothing is saved and you
 re-run — a partial map is worse than none.
