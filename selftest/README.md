@@ -1,0 +1,91 @@
+# selftest — hardware check and per-unit calibration
+
+Ten steps you run one at a time. Each exercises one subsystem, asks what you
+saw, and writes what it learned to a per-unit config overlay.
+
+**The defaults in `config.py` describe one calibrated car.** Yours may have the
+motors in different ports, the LED strip fitted the other way round, or a
+different PCB revision. This tool measures your car instead of assuming ours.
+
+```bash
+sudo systemctl stop yakrobot-freenove          # it owns the hardware
+
+cd ~/source
+python -m picar_freenove_fastapi.selftest              # list the steps
+python -m picar_freenove_fastapi.selftest bus          # run one
+python -m picar_freenove_fastapi.selftest --all        # run them in order
+python -m picar_freenove_fastapi.selftest --show       # print current calibration
+
+sudo systemctl start yakrobot-freenove
+```
+
+The server holds the I²C bus and the GPIO pins, so the runner refuses to start
+while it is running rather than fighting it for the hardware.
+
+## The steps
+
+| Step | Checks | Calibrates | Car must be |
+|---|---|---|---|
+| `bus` | I²C, PCA9685, ADC, clock, write speed | — | anywhere |
+| `battery` | voltage plausible | `pcb_version` | anywhere |
+| `servos` | pan/tilt direction and travel | `servo_trim_deg`, `servo_pan_inverted` | anywhere |
+| `leds` | strip lights, colours correct | `led_color_order`, `led_index_clockwise` | anywhere |
+| `motors` | every wheel turns both ways | **`motor_channels`** | **wheels raised** |
+| `duty` | wheels clear the stall floor | `duty_floor_unloaded` | **wheels raised** |
+| `mecanum` | strafing translates, not rotates | — | **on the floor** |
+| `ultrasonic` | distance responds to an obstacle | — | anywhere |
+| `line` | IR sensors see a dark line | `line_active_high_on_dark` | anywhere |
+| `camera` | frame captured and valid | — | anywhere |
+
+Run them in listed order on a new car: `bus` and `battery` first (a flat battery
+makes every later step lie), then `motors` before `mecanum`.
+
+## How `motors` works
+
+It assumes **nothing** about your wiring. It drives one PCA9685 channel at a
+time and asks which wheel moved and which way. Eight questions later it has the
+complete map, checks it for gaps and duplicates, then drives all four wheels
+forward and asks you to confirm before saving anything.
+
+If a wheel never moves, its lead is loose or the duty is below the stall floor.
+If two channels claim the same wheel and direction, nothing is saved and you
+re-run — a partial map is worse than none.
+
+## Why `mecanum` matters
+
+Forward motion looks correct even when two wheels are in each other's corners.
+Strafing does not: it comes out as rotation. `mecanum` is the only step that
+detects a wheel on the wrong corner, or a mecanum wheel mounted on the wrong
+side — the rollers must form an **X** when you look down at the car.
+
+## Where calibration is stored
+
+`/etc/yakrobot/unit.json`, overridable with `$PICAR_UNIT_CONFIG` or `--config`.
+`BoardConfig.load()` applies it over the packaged defaults, so the file only
+contains what differs on your car:
+
+```json
+{
+  "motor_channels": {
+    "left_front": [1, 0], "left_rear": [2, 3],
+    "right_front": [7, 6], "right_rear": [5, 4]
+  },
+  "pcb_version": 1,
+  "duty_floor_unloaded": 900,
+  "_calibrated_at": "2026-08-05T18:04:11+00:00"
+}
+```
+
+It is outside the repo on purpose: it belongs to the car, not the code, and it
+survives re-cloning. Steps merge into it rather than rewriting it, so running
+one step never discards another's work. Delete the file to return to defaults.
+
+## Safety
+
+Steps that move the car are gated. `motors` and `duty` ask you to confirm all
+four wheels are off the ground; `mecanum` asks you to confirm the floor is
+clear. Ctrl-C at any point cuts the motors, and so does an unexpected error.
+
+Nothing here bypasses the auto-stop timer in `robot.py` — these steps drive the
+motors directly and stop them explicitly, so an interrupted step leaves the car
+stopped, not coasting.

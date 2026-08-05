@@ -10,7 +10,30 @@ ADS7830 command/scaling are derived from Freenove's example code (public,
 per-kit). We reimplement the drivers; we carry over the constants.
 """
 
-from dataclasses import dataclass, field
+import json
+import logging
+import os
+from dataclasses import dataclass, field, fields
+from pathlib import Path
+
+log = logging.getLogger(__name__)
+
+# Per-unit calibration overlay. The defaults below describe ONE calibrated car;
+# a differently-assembled kit will have a different motor_channels map, servo
+# trim, LED colour order and so on. `python -m picar_freenove_fastapi.selftest`
+# measures those on your car and writes them here, leaving this file untouched.
+UNIT_CONFIG_ENV = "PICAR_UNIT_CONFIG"
+DEFAULT_UNIT_CONFIG = Path("/etc/yakrobot/unit.json")
+
+# Fields whose JSON form is a list-of-lists or list but must be tuples in Python.
+_TUPLE_VALUED = {"motor_channels", "servo_angle_limits"}
+_TUPLE_FIELDS = {"camera_stream_size"}
+
+
+def unit_config_path() -> Path:
+    """Where the per-unit overlay lives. $PICAR_UNIT_CONFIG wins if set."""
+    override = os.getenv(UNIT_CONFIG_ENV)
+    return Path(override) if override else DEFAULT_UNIT_CONFIG
 
 
 @dataclass
@@ -119,3 +142,54 @@ class BoardConfig:
 
     # --- Camera --------------------------------------------------------------
     camera_stream_size: tuple = (640, 480)
+
+    # --- LED strip orientation (per-unit) ------------------------------------
+    # True when ascending pixel index travels clockwise viewed from above. The
+    # `reverse` flag on /led is interpreted against this, so a strip fitted the
+    # other way round still animates in the requested direction.
+    led_index_clockwise: bool = True
+
+    # --- IR line sensors (per-unit) ------------------------------------------
+    # True when a sensor reads 1 over a DARK line. Freenove's boards ship both
+    # polarities; the selftest determines which you have.
+    line_active_high_on_dark: bool = True
+
+    # --- Per-unit overlay ----------------------------------------------------
+    @classmethod
+    def load(cls, path: Path | str | None = None) -> "BoardConfig":
+        """Defaults with this car's calibration applied on top.
+
+        Missing file is not an error — you get the defaults, which are one
+        calibrated unit's values and a reasonable starting guess for a kit
+        assembled the same way. Run the selftest to make them yours.
+        """
+        cfg = cls()
+        p = Path(path) if path is not None else unit_config_path()
+        if not p.exists():
+            return cfg
+        try:
+            data = json.loads(p.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            log.warning("ignoring unreadable unit config %s: %s", p, exc)
+            return cfg
+
+        known = {f.name for f in fields(cls)}
+        for key, value in data.items():
+            if key.startswith("_"):          # _comment, _calibrated_at, ...
+                continue
+            if key not in known:
+                log.warning("unit config %s: unknown field %r, ignored", p, key)
+                continue
+            if key in _TUPLE_VALUED and isinstance(value, dict):
+                value = {k: tuple(v) for k, v in value.items()}
+            elif key in _TUPLE_FIELDS and isinstance(value, list):
+                value = tuple(value)
+            setattr(cfg, key, value)
+        log.info("applied unit config from %s (%d fields)", p, len(data))
+        return cfg
+
+    def unit_overrides(self) -> dict:
+        """Fields differing from the defaults — what the selftest has written."""
+        base = type(self)()
+        return {f.name: getattr(self, f.name) for f in fields(self)
+                if getattr(self, f.name) != getattr(base, f.name)}

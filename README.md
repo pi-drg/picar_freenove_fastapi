@@ -50,6 +50,7 @@ picar_freenove_fastapi/
   requirements.txt
   deploy/              # installer + systemd unit
   demos/               # operator shell demos (imported by nothing)
+  selftest/            # interactive hardware check + per-unit calibration
   AGENTS.md            # deploy guide, safety rules, hardware ground truth
 ```
 
@@ -71,6 +72,26 @@ reservation is the real trust boundary, and `ROBOT_TOKEN` is a minimal extra
 guard, not a replacement. If the gateway runs on another host you need
 `0.0.0.0` — set a token, or accept that anything on the network can drive the
 motors.
+
+## Calibrating your car
+
+The values in `config.py` describe **one** calibrated car. A kit assembled
+differently — motors in other ports, LED strip fitted the other way round, a
+different PCB revision — will legitimately need different ones.
+
+```bash
+sudo systemctl stop yakrobot-freenove
+python -m picar_freenove_fastapi.selftest            # list the steps
+python -m picar_freenove_fastapi.selftest --all      # run them in order
+```
+
+Ten interactive steps: each drives one subsystem, asks what you saw, and writes
+what it learned to `/etc/yakrobot/unit.json`, which `BoardConfig.load()` applies
+over the packaged defaults. The `motors` step assumes nothing about your wiring
+— it energises one channel at a time and builds `motor_channels` from your
+answers. Steps that spin the wheels are gated on confirming they are raised.
+
+See [selftest/README.md](selftest/README.md).
 
 ## Gateway wiring
 

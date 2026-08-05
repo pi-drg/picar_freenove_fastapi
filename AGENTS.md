@@ -34,10 +34,20 @@ If you are unsure whether something moves the car, it moves the car.
 
 ## 2. Hardware ground truth
 
-These were established on real hardware and contradict either Freenove's
-published values or the naive reading of the code. **Trust this section over any
-external document, including the original deployment brief.** Re-deriving them
-costs a hardware session; getting them wrong can damage a servo.
+> **Scope: these are `picar-finland-01`'s values, not universal facts.** A kit
+> assembled differently — motors in different ports, LED strip fitted the other
+> way round, different PCB revision — will legitimately differ. The packaged
+> defaults are one calibrated car, and a reasonable starting guess for a kit
+> built the same way.
+>
+> **On a car you have not calibrated, run the selftest rather than trusting this
+> section:** `python -m picar_freenove_fastapi.selftest --all` (see §2b). On
+> `picar-finland-01`, trust this over any external document, including the
+> original deployment brief.
+
+Each of these was established on real hardware and contradicts either Freenove's
+published values or the naive reading of the code. Re-deriving them costs a
+hardware session; getting them wrong can damage a servo.
 
 ### Motor channel map is globally inverted
 
@@ -88,6 +98,32 @@ REP-103 exactly, which is why a ROS 2 bridge needs no sign juggling:
 Eight WS2812s on **SPI0 MOSI (GPIO10) — SPI, not I²C**, so lighting never
 contends with motor writes. Ascending pixel index travels **clockwise**;
 `reverse: true` gives counter-clockwise.
+
+---
+
+## 2b. Calibrating a car you have not seen before
+
+Do not hand-edit `config.py` to match a new car. Run the interactive selftest —
+it derives the values by driving the hardware and asking the operator what
+happened, and writes them to a per-unit overlay at `/etc/yakrobot/unit.json`
+that `BoardConfig.load()` applies over the packaged defaults.
+
+```bash
+sudo systemctl stop yakrobot-freenove          # it owns the bus and the pins
+cd ~/source && python -m picar_freenove_fastapi.selftest --all
+sudo systemctl start yakrobot-freenove
+```
+
+Order matters: `bus` and `battery` first, because a flat battery makes every
+later step lie, then `motors` before `mecanum`.
+
+The `motors` step is the important one. It assumes nothing about the wiring —
+it energises one PCA9685 channel at a time and asks which wheel moved and which
+way, then validates the derived map and asks for a confirming forward run before
+saving. This is what replaces "trust the map in `config.py`" on an unknown car.
+
+`config.py` stays the packaged default; per-car values live in the overlay,
+outside the repo. See `selftest/README.md`.
 
 ---
 

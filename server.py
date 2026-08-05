@@ -37,7 +37,7 @@ _ROBOT_TOKEN = os.getenv("ROBOT_TOKEN")  # optional shared bearer token
 def get_robot() -> Robot:
     global _robot
     if _robot is None:
-        _robot = Robot(BoardConfig())
+        _robot = Robot(BoardConfig.load())   # defaults + this car's calibration
     return _robot
 
 
