@@ -1,0 +1,30 @@
+# Cloudflare Tunnel config for picar-finland-01 — public teleop URL.
+# Install to /etc/cloudflared/config.yml (root:root 644) after filling in the
+# two placeholders. See AGENTS.md §3.5.
+#
+# Placeholders:
+#   <TUNNEL_UUID>       printed by `cloudflared tunnel create picar-finland-01`
+#   <PUBLIC_HOSTNAME>   the name you routed with `cloudflared tunnel route dns`
+
+tunnel: <TUNNEL_UUID>
+credentials-file: /home/drg/.cloudflared/<TUNNEL_UUID>.json
+
+# The tunnel dials OUT to Cloudflare, so the Finland router needs no inbound
+# port forward and no dynamic DNS. This is the whole reason for choosing a
+# tunnel over Caddy+port-forward.
+#
+# WebSockets need no configuration here: cloudflared proxies the Upgrade
+# handshake for any `http://` service, so /ws/control and /ws/video work as-is.
+# TLS is terminated at Cloudflare's edge, which is what lets the browser open
+# wss:// from an https:// page (mixed-content rule).
+ingress:
+  # The FastAPI server binds 0.0.0.0 rather than loopback, because
+  # yakrobot-gateway dials it from another host. 127.0.0.1 still reaches it,
+  # and keeps this hop on the loopback interface.
+  - hostname: <PUBLIC_HOSTNAME>
+    service: http://127.0.0.1:8080
+
+  # Catch-all is mandatory — cloudflared refuses to start without a final rule
+  # that has no hostname. 404 rather than a proxy, so a request arriving with
+  # any other Host header never reaches the motor endpoints.
+  - service: http_status:404

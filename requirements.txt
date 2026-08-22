@@ -8,5 +8,6 @@
 
 fastapi
 uvicorn
+websockets
 pydantic
 smbus2

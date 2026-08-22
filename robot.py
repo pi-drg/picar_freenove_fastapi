@@ -9,10 +9,13 @@ Camera driver is created lazily (picamera2 init is slow and not every task needs
 it). Sensors and PWM are initialised eagerly at construction.
 """
 
+import logging
 import threading
 
 from .config import BoardConfig
 from .drivers import PCA9685, Motors, Servos, ADC, Ultrasonic, LineArray, Camera, Leds
+
+logger = logging.getLogger(__name__)
 
 
 class Robot:
@@ -62,27 +65,43 @@ class Robot:
             mix = self.motors.drive(direction, duty)
         if direction != "stop":
             self._arm_auto_stop(duration_ms)
+        logger.info("MOTOR drive=%s duty=%d lf=%d lr=%d rf=%d rr=%d deadman=%dms",
+                    direction, duty, *mix, duration_ms)
         return {"direction": direction, "duties": mix}
 
     def mecanum(self, vx: int, vy: int, omega: int, duration_ms: int = 800) -> dict:
         with self._lock:
             mix = self.motors.mecanum(vx, vy, omega)
         self._arm_auto_stop(duration_ms)
+        logger.info("MOTOR vx=%d vy=%d omega=%d lf=%d lr=%d rf=%d rr=%d deadman=%dms",
+                    vx, vy, omega, *mix, duration_ms)
         return {"duties": mix}
 
     def stop(self) -> dict:
         with self._lock:
             self.motors.stop()
+        # `by` distinguishes a commanded stop from the auto-stop timer firing,
+        # which is the only way to see the deadman working in the journal.
+        by = "deadman" if threading.current_thread() is self._stop_timer else "command"
+        logger.info("MOTOR stop by=%s lf=0 lr=0 rf=0 rr=0", by)
         return {"direction": "stop"}
 
     # --- camera / servos -----------------------------------------------------
     def look(self, pan: int = 90, tilt: int = 90) -> dict:
         with self._lock:
-            return self.servos.look(pan, tilt)
+            result = self.servos.look(pan, tilt)
+        # Log the CLAMPED angles the servos actually took, not what was asked.
+        logger.info("SERVO pan=%s tilt=%s (requested pan=%d tilt=%d)",
+                    result.get("pan"), result.get("tilt"), pan, tilt)
+        return result
 
     def snapshot_jpeg(self) -> bytes:
         # Camera has its own internal sync; no need to hold the I2C lock.
-        return self.camera.grab_jpeg()
+        jpeg = self.camera.grab_jpeg()
+        # Only deliberate stills reach here. /ws/video pulls frames straight
+        # from the camera, so a 10 fps stream cannot flood the journal.
+        logger.info("CAMERA snapshot bytes=%d", len(jpeg))
+        return jpeg
 
     # --- LEDs ----------------------------------------------------------------
     # The strip is on SPI with its own lock, so none of these take the I2C lock —
@@ -107,12 +126,18 @@ class Robot:
             color = (r, g, b) if (r or g or b) else None
             leds.start_effect(effect, duration_ms=duration_ms, wait_ms=wait_ms,
                               color=color, reverse=reverse)
-        return leds.state()
+        state = leds.state()
+        logger.info("LED effect=%s rgb=(%d,%d,%d) index=%s brightness=%s reverse=%s",
+                    effect, r, g, b, index, brightness, reverse)
+        return state
 
     def led_state(self) -> dict:
         return self.leds.state()
 
     # --- sensing -------------------------------------------------------------
+    # Deliberately unlogged. /ws/control telemetry polls distance and battery
+    # on a timer, so logging reads would bury the MOTOR and SERVO lines the
+    # journal is actually read for. Query the endpoints when you want a value.
     def distance(self):
         with self._lock:
             return self.ultrasonic.distance_cm()
@@ -129,6 +154,10 @@ class Robot:
                 samples[str(a)] = self.ultrasonic.distance_cm()
         with self._lock:
             self.servos.set_angle("pan", 90)
+        # INFO because a scan moves the pan servo — it is actuation, not just
+        # a reading, and it leaves the camera recentred.
+        logger.info("SERVO scan angles=%s samples=%s recentred=90",
+                    list(angles), samples)
         return {"samples": samples, "unit": "cm"}
 
     def line_state(self) -> dict:
@@ -141,6 +170,7 @@ class Robot:
 
     # --- lifecycle -----------------------------------------------------------
     def close(self) -> None:
+        logger.info("ROBOT closing — stopping motors and releasing hardware")
         try:
             self.stop()
         finally:

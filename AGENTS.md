@@ -206,6 +206,70 @@ Binding `0.0.0.0` without a token exposes an unauthenticated motor endpoint to
 the whole network. If an operator asks for that, say so once, then respect the
 decision — but never make it silently.
 
+### 3.5 Public URL — WITHDRAWN from the Pi, now on the gateway host
+
+> **Do not run a tunnel on this Pi.** Set up and verified working on
+> 2026-08-16, then withdrawn the same day: the public edge moved to the
+> **gateway host**, which is on the same LAN and has CPU to spare that a
+> Pi Zero 2 W does not. `yakrobot-gateway` already implements both providers
+> in `src/core/tunnel.py`.
+>
+> Current state on this Pi: systemd unit **removed**; the `cloudflared` binary,
+> `/etc/cloudflared/config.yml` and the named tunnel `picar-finland-01`
+> (`f8f493f1-607b-42be-8f88-a3fa1fe37925`) are **left in place but dormant**.
+> The DNS record `picar-finland-01.yakrobot.com` still points at that dormant
+> tunnel and returns 1033/530 until repointed or deleted.
+>
+> The rest of this section is kept only as a working reference for how it was
+> done, should a Pi-hosted tunnel ever be wanted again.
+
+`cloudflared` runs on the Pi and dials **out** to Cloudflare. No inbound port
+forward, no dynamic DNS, no router access — which is why this beats
+Caddy-plus-port-forward for a car sitting on someone else's network.
+
+```bash
+cloudflared tunnel login                                    # interactive, once
+cloudflared tunnel create picar-finland-01
+cloudflared tunnel route dns picar-finland-01 <hostname>    # creates the CNAME
+sudo install -m644 deploy/cloudflared-config.yml.example /etc/cloudflared/config.yml
+#   ...then substitute <TUNNEL_UUID> and <PUBLIC_HOSTNAME>
+sudo cp deploy/cloudflared.service /etc/systemd/system/ && sudo systemctl daemon-reload
+cloudflared --config /etc/cloudflared/config.yml tunnel ingress validate
+```
+
+**The unit is installed disabled, on purpose. Start it for a session, stop it
+after:**
+
+```bash
+sudo systemctl start cloudflared     # public URL goes live
+sudo systemctl stop  cloudflared     # URL returns 502; car is unreachable
+```
+
+`systemctl enable` is the wrong move while `ROBOT_TOKEN` is unset (§3.4): the
+server does no auth, so a running tunnel is a **publicly drivable motor
+endpoint** for anyone holding the URL. On-demand start is the mitigation that
+costs nothing. Before enabling at boot, put a real control in front of it —
+Cloudflare Access on the hostname, or set `ROBOT_TOKEN`.
+
+Notes that will bite you:
+
+- **The origin stays `0.0.0.0:8080`.** Do not "tighten" it to loopback to suit
+  the tunnel: `yakrobot-gateway` dials this port from another host and would
+  break. `127.0.0.1` in the ingress rule reaches the same listener anyway.
+- **A fresh DNS route needs a moment.** Immediately after
+  `tunnel route dns`, the edge returns **1033 / HTTP 530** even with the tunnel
+  connected and all prechecks passing. It is propagation, not misconfiguration
+  — retest before debugging.
+- **`--no-autoupdate` is deliberate.** An auto-update restarts the tunnel and
+  drops every live WebSocket; mid-drive that kills the control socket and the
+  car coasts until the server deadman fires. Update between sessions.
+- **The tunnel is not a kill switch.** Stopping it drops the control socket, so
+  the car halts via §-deadman — but `sudo systemctl stop yakrobot-freenove`
+  (§1.3) remains the real one.
+
+Health check: `sudo journalctl -u cloudflared -n 40`. A working start logs four
+`Registered tunnel connection` lines; on this unit they land on `hel01`/`arn07`.
+
 ---
 
 ## 4. Verifying a deployment
@@ -225,6 +289,42 @@ curl -s -X POST <pi-host>:8080/look -H 'content-type: application/json' \
 ssh <pi-user>@<pi-host> "sudo journalctl -u yakrobot-freenove -b --no-pager \
      | grep -iE 'error|traceback|exception'"
 ```
+
+### 4.1 Actuation logging — measure motion, do not eyeball it
+
+Every actuation writes one line to the journal, so what the car did can be read
+off a timeline instead of watched. This matters more than it sounds: a raised
+wheel at duty 900 spins far too fast to judge direction by eye, and a 700 ms
+deadman is not eyeball-measurable at all.
+
+```bash
+ssh <pi-user>@<pi-host> "sudo journalctl -u yakrobot-freenove \
+     --since '2 minutes ago' -o short-precise --no-pager \
+     | grep -E 'MOTOR|SERVO|CAMERA|LED'"
+```
+
+```
+10:34:30.224633 MOTOR vx=0 vy=900 omega=0 lf=-900 lr=900 rf=900 rr=-900 deadman=700ms
+10:34:30.927835 MOTOR stop by=deadman lf=0 lr=0 rf=0 rr=0
+10:35:12.430039 SERVO pan=120 tilt=150 (requested pan=120 tilt=200)
+```
+
+- **`-o short-precise` is not optional.** Default second-granularity timestamps
+  cannot resolve a sub-second deadman.
+- **`stop by=deadman` vs `by=command`** separates the auto-stop timer firing
+  from a caller asking. Subtract the two timestamps and you have *measured* the
+  deadman — 703 ms against a 700 ms setting, on 2026-08-16.
+- **SERVO logs the clamped angle and the requested one**, so a clamp that bites
+  is visible rather than mysterious.
+- **What is deliberately not logged:** sensing (battery, distance, line) and
+  individual video frames. Telemetry polls sensors on a timer and `/ws/video`
+  runs at ~10 fps; logging either buries the lines above. `/ws/video` logs
+  `CAMERA stream open` / `closed` only, and `CAMERA snapshot` covers deliberate
+  stills via `/snapshot`.
+- An explicit stop does not cancel the pending auto-stop timer, so a redundant
+  `stop by=deadman` often follows a `by=command` a few hundred ms later. It is
+  harmless — a new drive command re-arms and cancels the old timer — but do not
+  read it as the deadman misfiring.
 
 To confirm the Pi matches your working tree:
 
@@ -285,8 +385,10 @@ carry them back to your machine. They are ignored via `.gitignore`.
 **`/drive` takes `"back"`, not `"backward"`.** An unknown direction raises
 `KeyError` → HTTP 500.
 
-**`/snapshot` returns base64 inside JSON.** Fine for a still; wasteful as a video
-path. For streaming, expose the MJPEG stream `camera.py` already implements.
+**`/snapshot` returns a raw JPEG body** — not JSON, not base64 (an older note
+here said otherwise; corrected 2026-08-16 against the running server). Callers
+needing it inside a structured result base64 it at their own layer. For
+streaming, use `/ws/video` rather than repeated snapshots.
 
 ---
 
@@ -295,7 +397,9 @@ path. For streaming, expose the MJPEG stream `camera.py` already implements.
 Do not change these without explicit instruction:
 
 - **The HTTP endpoint contract.** An external gateway adapter dials these exact
-  paths and shapes. `/led` was an addition; nothing was altered.
+  paths and shapes. `/led` was an addition; nothing was altered. So were
+  `/ws/control` and `/ws/video` (2026-08-16) — realtime teleop, documented in
+  §9. Additions are fine; changing an existing path or shape is not.
 - **The gateway repo or its plugin.**
 - **Board constants in `config.py`** — unless you are correcting them against
   real hardware, and then update the comment with the date and what you observed.
@@ -311,3 +415,65 @@ Do not change these without explicit instruction:
 - Comments explain *why*, especially where a value contradicts an upstream
   source. Every corrected constant carries the date and the observation.
 - `demos/` is operator tooling, imported by nothing, safe to edit live on the Pi.
+
+---
+
+## 9. Realtime teleop WebSockets
+
+Added 2026-08-16 as contract *additions* (§7). **This section is the protocol
+reference** — it is what a client implementer should read. Auth mirrors §3.4 but
+takes the token as `?token=<ROBOT_TOKEN>`, because browsers cannot set headers
+on a WS handshake.
+
+| Socket | Direction | Carries |
+|---|---|---|
+| `/ws/control` | both | JSON text frames |
+| `/ws/video` | down | binary JPEG frames, latest-frame |
+
+Client → server on `/ws/control`:
+
+```jsonc
+{"type": "drive", "vx": 1200, "vy": 0, "omega": 0}   // absolute state
+{"type": "look",  "pan": 96, "tilt": 84}             // absolute angles
+{"type": "stop"}
+{"type": "ping",  "t": 1723280000000}                // client clock, echoed back
+```
+
+Server → client:
+
+```jsonc
+{"type": "hello", "wheels": "mecanum", "holonomic": true, "battery_v": 7.9,
+ "deadman_ms": 700, "max_duty": 1400, "controller": true}
+{"type": "look", "pan": 96, "tilt": 84}                        // CLAMPED echo
+{"type": "telemetry", "battery_v": 7.8, "distance_cm": 87.2}   // every control_telemetry_s
+{"type": "pong", "t": 1723280000000}
+{"type": "error", "detail": "busy"}
+```
+
+`hello` carries this car's deadman and duty cap so a client tunes its heartbeat
+and speed limit to the server's reality instead of hardcoding them. Tunables are
+`control_deadman_ms`, `control_max_duty` and `control_telemetry_s` in
+`config.py`, overridable per unit in `/etc/yakrobot/unit.json`.
+
+Things that will bite you:
+
+- **`uvicorn` alone cannot accept a WebSocket.** It needs a protocol
+  implementation, and bare `uvicorn` does not pull one in — every handshake is
+  rejected until `websockets` is installed. It is in `requirements.txt`; if
+  upgrades ever drop it, the symptom is a failed handshake, not an error you
+  can see in this file.
+- **`duration_ms` on the WS drive path IS the deadman.** Each `drive` re-arms
+  `Robot._arm_auto_stop` with `control_deadman_ms`, so silence stops the car.
+  There is no second watchdog — do not add one, and do not raise
+  `control_deadman_ms` without understanding that it is how long a car with a
+  dead link keeps rolling.
+- **Control is absolute state, not deltas.** Every message carries the full
+  `(vx, vy, omega)`. Keep it that way: it is what makes a lost or reordered
+  frame harmless, and a delta protocol over a jittery transatlantic link
+  desynchronises silently.
+- **One driver at a time.** A second `/ws/control` connection is accepted but
+  view-only, and told `{"type":"error","detail":"busy"}`. The slot frees on
+  disconnect, which also calls `robot.stop()`.
+- **Test without a car.** `yakrobot-gateway` ships a `fakerobot_picar` plugin
+  whose simulator serves this exact protocol: `yakrobot sim --robot
+  fakerobot_picar`. Use it before booking a hardware session.

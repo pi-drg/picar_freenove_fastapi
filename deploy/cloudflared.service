@@ -1,0 +1,32 @@
+[Unit]
+Description=Cloudflare Tunnel for picar-finland-01 (public teleop URL)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Type=notify: cloudflared signals readiness once the edge connections are up,
+# so `systemctl start` returning means the public URL is actually live.
+Type=notify
+TimeoutStartSec=0
+User=drg
+Group=drg
+ExecStart=/usr/bin/cloudflared --no-autoupdate --config /etc/cloudflared/config.yml tunnel run
+Restart=on-failure
+RestartSec=5
+
+# --no-autoupdate: an auto-update restarts the tunnel, which drops every live
+# WebSocket. Mid-drive that means the control socket dies and the car coasts
+# until the server deadman fires. Update deliberately, between sessions.
+
+[Install]
+# DELIBERATELY NOT ENABLED. Install this unit but leave it disabled:
+#
+#     sudo systemctl start cloudflared     # open the window for a session
+#     sudo systemctl stop  cloudflared     # close it afterwards
+#
+# While ROBOT_TOKEN is unset in /etc/yakrobot/env, the server performs NO auth
+# (AGENTS.md §3.4), so a running tunnel is a publicly drivable motor endpoint
+# for anyone who has the URL. On-demand start is the mitigation that costs
+# nothing. Before `systemctl enable` is appropriate, put a real control in
+# front of it: Cloudflare Access on the hostname, or set ROBOT_TOKEN.
+WantedBy=multi-user.target

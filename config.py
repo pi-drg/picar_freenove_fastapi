@@ -168,6 +168,35 @@ class BoardConfig:
 
     # --- Camera --------------------------------------------------------------
     camera_stream_size: tuple = (640, 480)
+    # Cap on /ws/video. The camera happily produces 30 fps at 640x480, which is
+    # ~450 KB/s — about 1.6 GB per hour of driving, and enough to exhaust a
+    # metered tunnel in an afternoon. Teleop does not need 30 fps: 10 is smooth
+    # enough to drive by and costs a third as much.
+    #
+    # Frame rate is deliberately the first thing traded away, not resolution.
+    # Resolution is the detail the operator is steering by; frame rate above
+    # ~10 fps is a luxury they will not miss. Frames over the cap are DROPPED
+    # rather than queued, so the newest frame is always the one sent and
+    # latency never compounds.
+    camera_stream_fps: float = 10.0
+
+    # --- Realtime control (/ws/control) --------------------------------------
+    # Deadman: every WS drive command arms the existing auto-stop timer with
+    # this duration, so the car halts if heartbeats stop for any reason — tab
+    # closed, link dropped, operator's Wi-Fi died. 700 ms is sized for
+    # transatlantic teleop: the 300-400 ms that feels right on a LAN
+    # false-triggers on every jitter spike and makes the car stutter. The cost
+    # is that a real link loss coasts up to 700 ms. Drop it to 400 for LAN
+    # driving; lower it in the per-unit overlay for a tight demo floor.
+    control_deadman_ms: int = 700
+    # Ceiling on any single duty component from a WS client, well under the
+    # ±4095 hardware clamp. With ~400 ms of sensing delay, full speed is how
+    # remote-driven robots meet walls.
+    control_max_duty: int = 1400
+    # How often /ws/control pushes battery + ultrasonic distance. Over WAN the
+    # camera is the operator's only eye, so a live range reading is the
+    # cheapest collision guard there is.
+    control_telemetry_s: float = 3.0
 
     # --- LED strip orientation (per-unit) ------------------------------------
     # True when ascending pixel index travels clockwise viewed from above. The
