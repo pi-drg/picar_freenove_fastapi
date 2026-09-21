@@ -174,7 +174,7 @@ def save_unit(path: Path, updates: dict) -> None:
         warn(f"no permission to write {path}")
         say("  Wrote it to a temporary file instead. Install it — the -o/-g keep")
         say("  it writable, so later steps save without this detour:")
-        say(f"    {C.B}sudo install -D -m644 -o {user} -g {user} {tmp} {path}{C.X}")
+        say(f"    {C.B}{C.C_}sudo install -D -m644 -o {user} -g {user} {tmp} {path}{C.X}")
         return
     say(f"\n{C.G}saved {path}{C.X}")
 
