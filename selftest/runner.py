@@ -216,6 +216,18 @@ def safety_gate(st: Step) -> bool:
 
 # --- CLI ---------------------------------------------------------------------
 
+def print_orientation_note() -> None:
+    """Steps ask about forward/reverse, left/right and clockwise/counter-clockwise
+    without re-explaining the frame each time. Say it once, up front, instead.
+    """
+    say(f"\n{C.B}Orientation, before you start:{C.X}")
+    say("  FRONT of the car is the end with the camera / pan-tilt head. Every")
+    say("  direction question below (forward/reverse, left/right, clockwise) is")
+    say("  judged looking down at the car from above with that end pointing")
+    say("  away from you. Face the camera away from you now, so it stays")
+    say("  consistent for the rest of the run.")
+
+
 def list_steps(path: Path) -> None:
     unit = load_unit(path)
     say(f"\n{C.B}Hardware self-test and calibration{C.X}")
@@ -314,6 +326,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if not require_service_stopped():
         return 1
+
+    print_orientation_note()
 
     cfg = BoardConfig.load(path)
     done = 0

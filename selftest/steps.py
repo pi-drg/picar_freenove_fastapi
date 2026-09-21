@@ -393,7 +393,7 @@ def motors_step(cfg: BoardConfig) -> dict:
 # --- 7. duty -----------------------------------------------------------------
 
 @step("duty", "find the duty where the wheels start turning",
-      moves=True, writes=("duty_floor_unloaded",))
+      on_floor=True, writes=("duty_floor_unloaded",))
 def duty_step(cfg: BoardConfig) -> dict:
     say("Ramping all four wheels from a stall. Say when they start turning.\n")
     p = _pca(cfg)
