@@ -32,7 +32,7 @@ while it is running rather than fighting it for the hardware.
 | `servos` | pan/tilt direction and travel | `servo_trim_deg`, `servo_pan_inverted` | anywhere |
 | `leds` | strip lights, colours correct | `led_color_order`, `led_index_clockwise` | anywhere |
 | `motors` | every wheel turns both ways | **`motor_channels`** | **wheels raised** |
-| `duty` | wheels clear the stall floor | `duty_floor_unloaded` | **wheels raised** |
+| `duty` | wheels clear the stall floor | `duty_floor_unloaded` | **on the floor** |
 | `mecanum` | strafing translates, not rotates | — | **on the floor** |
 | `ultrasonic` | distance responds to an obstacle | — | anywhere |
 | `line` | IR sensors see a dark line | `line_active_high_on_dark` | anywhere |
@@ -108,9 +108,10 @@ one step never discards another's work. Delete the file to return to defaults.
 
 ## Safety
 
-Steps that move the car are gated. `motors` and `duty` ask you to confirm all
-four wheels are off the ground; `mecanum` asks you to confirm the floor is
-clear. Ctrl-C at any point cuts the motors, and so does an unexpected error.
+Steps that move the car are gated. `motors` asks you to confirm all four
+wheels are off the ground; `duty` and `mecanum` ask you to confirm the floor
+is clear, since both drive the car across it. Ctrl-C at any point cuts the
+motors, and so does an unexpected error.
 
 Nothing here bypasses the auto-stop timer in `robot.py` — these steps drive the
 motors directly and stop them explicitly, so an interrupted step leaves the car
